@@ -17,8 +17,13 @@ GHAPI="https://api.github.com/repos/$OWNER/$REPO/contents"
 count=$(git ls-files | wc -l)
 echo "准备上传 $count 个文件到 $OWNER/$REPO（后端地址=$SERVER_URL）..."
 
+# 临时文件（避免超大文件 base64 传命令行参数触发 Argument list too long）
+TMPB64="$(pwd)/.deploy_b64.tmp"
+TMPBODY="$(pwd)/.deploy_body.json"
+
 git ls-files | while IFS= read -r f; do
-  b64=$(base64 -w0 "$f")
+  # base64 写入临时文件，避免命令行过长
+  base64 -w0 "$f" > "$TMPB64"
   # 取已存在文件的 sha（用于更新模式）；不存在则为空
   sha=$(curl -s --resolve api.github.com:443:20.205.243.168 \
     -H "Authorization: Bearer $GH_TOKEN" "$GHAPI/$f" \
@@ -28,13 +33,18 @@ try:
 except Exception:
     print('')" 2>/dev/null)
   if [ -n "$sha" ]; then
-    python -c "import json,sys;b=sys.argv[1];s=sys.argv[2];open('/tmp/gh_body.json','w').write(json.dumps({'message':'update '+sys.argv[3],'content':b,'sha':s}))" "$b64" "$sha" "$f"
+    python -c "import json,sys
+b=open(sys.argv[1]).read().strip()
+s=sys.argv[2]; m='update '+sys.argv[3]
+open(sys.argv[4],'w').write(json.dumps({'message':m,'content':b,'sha':s}))" "$TMPB64" "$sha" "$f" "$TMPBODY"
   else
-    python -c "import json,sys;b=sys.argv[1];open('/tmp/gh_body.json','w').write(json.dumps({'message':'add '+sys.argv[2],'content':b}))" "$b64" "$f"
+    python -c "import json,sys
+b=open(sys.argv[1]).read().strip()
+open(sys.argv[3],'w').write(json.dumps({'message':'add '+sys.argv[2],'content':b}))" "$TMPB64" "$f" "$TMPBODY"
   fi
   code=$(curl -s -o /tmp/gh_resp.json -w "%{http_code}" --resolve api.github.com:443:20.205.243.168 \
     -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
-    --data-binary @/tmp/gh_body.json -X PUT "$GHAPI/$f")
+    --data-binary @"$TMPBODY" -X PUT "$GHAPI/$f")
   if [ "$code" = "200" ] || [ "$code" = "201" ]; then
     echo "  [OK $code] $f"
   else
@@ -42,6 +52,8 @@ except Exception:
     head -c 400 /tmp/gh_resp.json; echo
   fi
 done
+
+rm -f "$TMPB64" "$TMPBODY"
 
 echo "=== 触发 Android 云编译 (server_url=$SERVER_URL) ==="
 curl -s -o /tmp/gh_dispatch.json -w "dispatch -> HTTP %{http_code}\n" --resolve api.github.com:443:20.205.243.168 \
