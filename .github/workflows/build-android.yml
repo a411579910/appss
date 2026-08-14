@@ -1,0 +1,53 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'Laravel 后端地址（手机可访问的 http://公网IP或LAN_IP:8000）'
+        required: false
+        default: 'http://61.240.21.74:8000'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set server URL & sync Capacitor
+        run: |
+          export CAP_SERVER_URL="${{ github.event.inputs.server_url || 'http://61.240.21.74:8000' }}"
+          npm ci
+          npx cap sync android
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+
+      - name: Install SDK packages (API 36 编译 / build-tools 35)
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+
+      - name: Build Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dorm-app-android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
