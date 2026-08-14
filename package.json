@@ -1,0 +1,26 @@
+{
+  "name": "dorm-app",
+  "version": "1.0.0",
+  "description": "宿舍管理 App (Capacitor shell)",
+  "main": "index.js",
+  "scripts": {
+    "sync": "cap sync",
+    "sync:android": "cap sync android",
+    "sync:ios": "cap sync ios",
+    "build:android": "cap sync android && cd android && ./gradlew assembleDebug --no-daemon",
+    "build:ios": "cap sync ios && cd ios/App && pod install"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
+  }
+}
