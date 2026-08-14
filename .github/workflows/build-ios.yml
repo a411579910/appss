@@ -1,0 +1,102 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'Laravel 后端地址（手机可访问的 http://公网IP或LAN_IP:8000）'
+        required: false
+        default: 'http://61.240.21.74:8000'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Set server URL & sync Capacitor
+        run: |
+          export CAP_SERVER_URL="${{ github.event.inputs.server_url || 'http://61.240.21.74:8000' }}"
+          npm ci
+          npx cap sync ios
+
+      - name: Install CocoaPods & pods
+        run: |
+          sudo gem install cocoapods
+          cd ios/App && pod install
+
+      # 未配置 Apple 签名密钥时：仅编译验证工程（不出 IPA，不阻断）
+      - name: Build (validate only, 无签名)
+        if: ${{ secrets.IOS_CERTIFICATE == '' }}
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App \
+            -configuration Release -destination 'generic/platform=iOS' \
+            build CODE_SIGNING_ALLOWED=NO
+
+      # 已配置 4 个 secrets 时：导入证书+描述文件，归档并导出可安装 IPA
+      - name: Import signing certificate & provisioning profile
+        if: ${{ secrets.IOS_CERTIFICATE != '' }}
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/build.keychain-db
+          security create-keychain -p "temp" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "temp" "$KEYCHAIN"
+          echo -n "$IOS_CERTIFICATE" | base64 --decode -o $RUNNER_TEMP/cert.p12
+          security import $RUNNER_TEMP/cert.p12 -P "$IOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security set-key-partition-list -S apple-tool:. -s -k "temp" "$KEYCHAIN"
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo -n "$IOS_PROVISIONING_PROFILE" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+
+      - name: Archive & export IPA
+        if: ${{ secrets.IOS_CERTIFICATE != '' }}
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            DEVELOPMENT_TEAM=$IOS_TEAM_ID \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="dorm-admin-profile" \
+            archive
+          cat > $RUNNER_TEMP/export.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>ad-hoc</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$IOS_TEAM_ID</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.dorm.admin</key><string>dorm-admin-profile</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            -exportOptionsPlist $RUNNER_TEMP/export.plist \
+            -exportPath $RUNNER_TEMP/ipa
+          mv $RUNNER_TEMP/ipa/App.ipa ios/App/build/App.ipa
+
+      - name: Upload IPA
+        if: ${{ secrets.IOS_CERTIFICATE != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dorm-app-ios-ipa
+          path: ios/App/build/App.ipa
