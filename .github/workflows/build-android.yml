@@ -42,12 +42,16 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
           echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 
-      - name: Fix gradlew permission
-        run: chmod +x android/gradlew
+      - name: Install Gradle 8.14.3
+        run: |
+          GRADLE_VERSION=8.14.3
+          curl -fsSL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q -d "$HOME/gradle" /tmp/gradle.zip
+          echo "$HOME/gradle/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
