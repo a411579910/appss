@@ -4,6 +4,8 @@
 # 用法：bash deploy.sh <仓库名> [server_url]
 # 说明：用 GitHub Contents API 上传（--resolve 绕过 Steam++ 对 github 的 hosts 劫持），
 #       不依赖 git push / 系统 hosts / 管理员权限。每个文件都打印成败，不静默中断。
+#       改进：base64 编码用 Python 绝对路径（不依赖 coreutils 的 base64 命令），
+#             临时文件写项目目录（避开 Git Bash 下 /tmp 不可写）。
 set -u
 
 OWNER=a411579910
@@ -13,53 +15,59 @@ SERVER_URL="${2:-http://61.240.21.74:8000}"
 
 cd /f/SS/dorm-app
 
+PY="/c/Users/admin/.workbuddy/binaries/python/versions/3.14.3/python.exe"
 GHAPI="https://api.github.com/repos/$OWNER/$REPO/contents"
+RESOLVE="--resolve api.github.com:443:20.205.243.168"
+
 count=$(git ls-files | wc -l)
 echo "准备上传 $count 个文件到 $OWNER/$REPO（后端地址=$SERVER_URL）..."
 
-# 临时文件（避免超大文件 base64 传命令行参数触发 Argument list too long）
-TMPB64="$(pwd)/.deploy_b64.tmp"
-TMPBODY="$(pwd)/.deploy_body.json"
+TMPBODY=".deploy_body.json"
+TMPRESP=".deploy_resp.json"
 
 git ls-files | while IFS= read -r f; do
-  # base64 写入临时文件，避免命令行过长
-  base64 -w0 "$f" > "$TMPB64"
-  # 取已存在文件的 sha（用于更新模式）；不存在则为空
-  sha=$(curl -s --resolve api.github.com:443:20.205.243.168 \
+  # 1) 查已存在文件的 sha（用于 update 模式）；不存在则为空
+  sha=$(curl -s $RESOLVE \
     -H "Authorization: Bearer $GH_TOKEN" "$GHAPI/$f" \
-    | python -c "import sys,json
+    | "$PY" -c "import sys,json
 try:
     print(json.load(sys.stdin).get('sha',''))
 except Exception:
     print('')" 2>/dev/null)
-  if [ -n "$sha" ]; then
-    python -c "import json,sys
-b=open(sys.argv[1]).read().strip()
-s=sys.argv[2]; m='update '+sys.argv[3]
-open(sys.argv[4],'w').write(json.dumps({'message':m,'content':b,'sha':s}))" "$TMPB64" "$sha" "$f" "$TMPBODY"
-  else
-    python -c "import json,sys
-b=open(sys.argv[1]).read().strip()
-open(sys.argv[3],'w').write(json.dumps({'message':'add '+sys.argv[2],'content':b}))" "$TMPB64" "$f" "$TMPBODY"
-  fi
-  code=$(curl -s -o /tmp/gh_resp.json -w "%{http_code}" --resolve api.github.com:443:20.205.243.168 \
+
+  # 2) 用 Python 读取文件做 base64 并写 body JSON（不依赖 base64 命令）
+  "$PY" -c "
+import base64, json, sys
+f=sys.argv[1]; sha=sys.argv[2]; out=sys.argv[3]
+with open(f,'rb') as fh:
+    content=base64.b64encode(fh.read()).decode()
+if sha:
+    body={'message':'update '+f,'content':content,'sha':sha}
+else:
+    body={'message':'add '+f,'content':content}
+open(out,'w').write(json.dumps(body))
+" "$f" "$sha" "$TMPBODY"
+
+  # 3) PUT 上传
+  code=$(curl -s -o "$TMPRESP" -w "%{http_code}" $RESOLVE \
     -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
     --data-binary @"$TMPBODY" -X PUT "$GHAPI/$f")
   if [ "$code" = "200" ] || [ "$code" = "201" ]; then
     echo "  [OK $code] $f"
   else
     echo "  [FAIL $code] $f"
-    head -c 400 /tmp/gh_resp.json; echo
+    head -c 400 "$TMPRESP"; echo
   fi
 done
 
-rm -f "$TMPB64" "$TMPBODY"
+rm -f "$TMPBODY" "$TMPRESP"
 
 echo "=== 触发 Android 云编译 (server_url=$SERVER_URL) ==="
-curl -s -o /tmp/gh_dispatch.json -w "dispatch -> HTTP %{http_code}\n" --resolve api.github.com:443:20.205.243.168 \
+curl -s -o .deploy_dispatch.json -w "dispatch -> HTTP %{http_code}\n" $RESOLVE \
   -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
   -d "{\"ref\":\"main\",\"inputs\":{\"server_url\":\"$SERVER_URL\"}}" \
   "https://api.github.com/repos/$OWNER/$REPO/actions/workflows/build-android.yml/dispatches"
-head -c 400 /tmp/gh_dispatch.json; echo
+head -c 400 .deploy_dispatch.json; echo
+rm -f .deploy_dispatch.json
 
 echo "完成 → 去 https://github.com/$OWNER/$REPO/actions 查看并下载 APK 产物 (dorm-app-android-apk)"
