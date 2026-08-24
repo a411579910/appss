@@ -8,9 +8,10 @@ const config: CapacitorConfig = {
   appName: '宿舍管理',
   webDir: 'www',
   server: {
-    // 默认后端地址（公网/局域网均可）；云编译可用环境变量 CAP_SERVER_URL 覆盖（无需改文件）
-    url: process.env.CAP_SERVER_URL || 'http://61.240.21.74:8000',
-    // 放行 http（局域网无 HTTPS）。Android 自动开启 usesCleartextTraffic，iOS 注入 ATS 例外
+    // 默认后端地址；统一走 Cloudflare Tunnel 域名（海外 Anycast、免备案、不依赖固定公网 IP）。
+    // 云编译可用环境变量 CAP_SERVER_URL 覆盖（无需改文件）。
+    url: process.env.CAP_SERVER_URL || 'https://dorm.fnwork.top',
+    // 放行 http（局域网无 HTTPS 时备用）。Android 自动开启 usesCleartextTraffic，iOS 注入 ATS 例外
     cleartext: true,
   },
   android: {
