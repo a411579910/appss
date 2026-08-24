@@ -10,7 +10,7 @@ set -u
 
 OWNER=a411579910
 REPO="${1:?用法: bash deploy.sh <仓库名> [server_url]}"
-SERVER_URL="${2:-http://61.240.21.74:8000}"
+SERVER_URL="${2:-https://dorm.fnwork.top}"
 : "${GH_TOKEN:?请先 export GH_TOKEN=你的token}"
 
 cd /f/SS/dorm-app
