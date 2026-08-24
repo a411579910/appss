@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       server_url:
-        description: 'Laravel 后端地址（手机可访问的 http://公网IP或LAN_IP:8000）'
+        description: 'Laravel 后端地址（手机可访问的 https://域名 或 http://LAN_IP:8000）'
         required: false
-        default: 'http://61.240.21.74:8000'
+        default: 'https://dorm.fnwork.top'
 
 jobs:
   build:
@@ -28,7 +28,7 @@ jobs:
 
       - name: Set server URL & sync Capacitor
         run: |
-          export CAP_SERVER_URL="${{ github.event.inputs.server_url || 'http://61.240.21.74:8000' }}"
+          export CAP_SERVER_URL="${{ github.event.inputs.server_url || 'https://dorm.fnwork.top' }}"
           npm install --no-audit --no-fund
           npx cap sync android
 
